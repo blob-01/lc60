@@ -205,6 +205,7 @@ svg.map.dragging{cursor:grabbing}
 .map .me .dot{fill:var(--accent);stroke:#fff} .map .me .pulse{fill:var(--accent);opacity:.25;transform-box:fill-box;transform-origin:center}
 @media (prefers-reduced-motion:no-preference){.map .me .pulse{animation:halo 1.8s ease-out infinite}}
 .mestat{position:absolute;left:12px;top:12px;right:66px;width:fit-content;padding:8px 12px;border-radius:14px;border:1px solid var(--glass-line);background:var(--glass-strong);color:var(--ink);font:500 .8rem/1.35 var(--body);box-shadow:0 4px 12px rgba(0,0,0,.1)}
+.mestat .mebtns{display:flex;gap:8px;margin-top:8px} .mestat .mebtns button{border:0;border-radius:999px;padding:7px 14px;font:600 .8rem var(--body);cursor:pointer;background:var(--accent);color:#fff} .mestat .mebtns button+button{background:transparent;color:var(--ink);border:1px solid var(--glass-line)}
 .mchips{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 4px;scrollbar-width:none}
 .mchips::-webkit-scrollbar{display:none}
 .mchips button{flex:none;display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:14px;border:1px solid var(--glass-line);background:var(--glass-strong);font:500 .84rem/1 var(--body);color:var(--ink);cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.05)}
@@ -969,9 +970,23 @@ function drawMe(){
   meG.innerHTML=`<circle class="acc" cx="${me.x}" cy="${me.y}" r="${Math.min(me.acc,500)*.43}" stroke-width="${s}"/><circle class="pulse" cx="${me.x}" cy="${me.y}" r="${16*s}"/><circle class="dot" cx="${me.x}" cy="${me.y}" r="${7*s}" stroke-width="${3*s}"/>`;
 }
 function meOff(){ if(meWatch!==null) navigator.geolocation.clearWatch(meWatch); meWatch=null; me=null; meBtn.setAttribute("aria-pressed","false"); drawMe(); }
-meBtn.addEventListener("click",()=>{
+// conferma nella pagina, poi la richiesta di Safari: le impostazioni dell'iPhone una pagina web non le può cambiare
+const ME_OFF_TXT=/github\.io$/.test(location.hostname)?"La posizione è bloccata sull'iPhone. Attivala in Impostazioni › Privacy e sicurezza › Localizzazione › Siti web Safari (Chiedi o Mentre usi l'app), poi in Impostazioni › App › Safari › Posizione scegli Chiedi, ricarica la pagina e tocca di nuovo la freccia.":"Qui la posizione non è disponibile: apri la pagina da blob-01.github.io/lc60.";
+function meAsk(){
+  clearTimeout(meTimer); meStat.hidden=false;
+  meStat.innerHTML='<b>Mostro dove sei sulla mappa?</b><br>Safari ti chiederà il permesso: tocca «Consenti».<span class="mebtns"><button type="button" data-me="ok">Attiva</button><button type="button" data-me="no">Annulla</button></span>';
+}
+meStat.addEventListener("click",e=>{ const b=e.target.closest("[data-me]"); if(!b) return;
+  if(b.dataset.me==="ok"){ try{localStorage.setItem("lc60-me","1");}catch(_){} meStart(); } else meSay(""); });
+meBtn.addEventListener("click",async()=>{
   if(meWatch!==null){ meOff(); meSay(""); return; }
   if(!navigator.geolocation){ meSay("Questo browser non dà la posizione."); return; }
+  let st="prompt"; try{ st=(await navigator.permissions.query({name:"geolocation"})).state; }catch(_){}
+  if(st==="denied"){ meSay(ME_OFF_TXT,true); return; }
+  let ok=st==="granted"; try{ ok=ok||localStorage.getItem("lc60-me")==="1"; }catch(_){}
+  if(ok) meStart(); else meAsk();
+});
+function meStart(){
   meBtn.setAttribute("aria-pressed","true"); meCenter=true; meSay("Cerco la tua posizione…",true);
   meWatch=navigator.geolocation.watchPosition(p=>{
     const c=p.coords, q=toXY(c.latitude,c.longitude);
@@ -984,9 +999,9 @@ meBtn.addEventListener("click",()=>{
     applyVB();
   },err=>{
     meOff();
-    meSay(err.code===1?"Posizione non concessa. Apri la pagina da blob-01.github.io/lc60 e consenti la posizione a Safari (Impostazioni › Privacy › Localizzazione).":"Posizione non trovata, riprova all'aperto.",true);
+    meSay(err.code===1?ME_OFF_TXT:"Posizione non trovata, riprova all'aperto.",true);
   },{enableHighAccuracy:true,maximumAge:5000,timeout:20000});
-});
+}
 // trascina con un dito / mouse, zoom con due dita
 let ptrs=new Map(), start=null, dragMoved=false, pinch=null;
 const toUnits = (dxPx,dyPx) => { const r=svg.getBoundingClientRect(); return [dxPx*vb.w/r.width, dyPx*vb.h/r.height]; };
