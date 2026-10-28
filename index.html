@@ -135,6 +135,14 @@ ol.steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;g
 .tpill{font:600 .78rem/1 var(--body);padding:6px 10px;border-radius:999px;background:var(--tile);font-variant-numeric:tabular-nums}
 .badge{font:600 .7rem/1 var(--body);padding:5px 9px;border-radius:999px;background:var(--tile);color:var(--muted)}
 .badge.now{background:var(--accent);color:var(--on-accent)}
+.tpill s{opacity:.55;font-weight:500;margin-right:5px}
+.tpill.moved{background:var(--accent);color:var(--on-accent)}
+.donebtn{margin-left:auto;display:inline-flex;align-items:center;gap:6px;border:1px solid var(--glass-line);background:var(--glass-strong);color:var(--ink);border-radius:999px;padding:5px 11px 5px 6px;font:600 .74rem/1 var(--body);cursor:pointer}
+.donebtn i{width:20px;height:20px;border-radius:50%;border:2px solid var(--accent);display:grid;place-items:center;flex:none}
+.donebtn[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.donebtn[aria-pressed="true"] i{background:#fff;border-color:#fff}
+.donebtn[aria-pressed="true"] i::after{content:"";width:5px;height:9px;border:solid var(--accent);border-width:0 2.5px 2.5px 0;transform:translateY(-1px) rotate(45deg)}
+.step.is-done h3{text-decoration:line-through;text-decoration-color:var(--accent)}
 .step .place{display:flex;align-items:center;gap:8px;font:500 .8rem/1.3 var(--body);color:var(--muted)}
 .step p{font-size:.9rem}
 .tip{font-size:.86rem;background:var(--tip-bg);padding:9px 12px;border-radius:16px}
@@ -815,9 +823,22 @@ function today(){
   const d = n.getFullYear()===2026&&n.getMonth()===9 ? (n.getDate()===28?1:n.getDate()===29?2:0) : 0;
   return {d, min:n.getHours()*60+n.getMinutes(), hm:String(n.getHours()).padStart(2,"0")+":"+String(n.getMinutes()).padStart(2,"0")};
 }
+// Tappe spuntate: {indice: minuto in cui è stata spuntata}. Gli orari dopo l'ultima spunta scalano di conseguenza.
+const doneOf = d => { try{ return JSON.parse(store.get("lc60-done-"+d)||"{}"); }catch(e){ return {}; } };
+const hm = m => { m=((m%1440)+1440)%1440; return String(Math.floor(m/60)).padStart(2,"0")+":"+String(m%60).padStart(2,"0"); };
+function effMin(d,i){
+  const L=DAYS[d], D=doneOf(d); let k=-1;
+  for(let j=0;j<i;j++) if(D[j]!=null) k=j;
+  if(k<0||k+1>=L.length) return toMin(L[i].t);
+  const shift=Math.floor((D[k]-toMin(L[k+1].t))/5)*5;
+  return toMin(L[i].t)+shift;
+}
+const effT = (d,i) => hm(effMin(d,i));
 function curIndex(d){
   const t=today(); if(t.d!==d) return -1;
-  let i=-1; DAYS[d].forEach((s,j)=>{ if(toMin(s.t)<=t.min) i=j; }); return i;
+  let i=-1; DAYS[d].forEach((s,j)=>{ if(effMin(d,j)<=t.min) i=j; });
+  const D=doneOf(d); let k=-1; DAYS[d].forEach((s,j)=>{ if(D[j]!=null) k=j; });
+  return Math.max(i,Math.min(k+1,DAYS[d].length-1));
 }
 let day = today().d || (+store.get("lucca-day")===2?2:1);
 function setDay(d){ day=d; store.set("lucca-day",d); renderAll(); }
@@ -828,12 +849,13 @@ function renderClock(){ $("clocktxt").textContent=today().hm; }
 // Le tre card di vetro dell'hero
 function renderNow(){
   const L=DAYS[day], ci=curIndex(day), live=ci>=0, i=live?ci:0, s=L[i], nx=L[i+1];
-  const label = live?`Adesso · dalle ${s.t}`:(day===1?`Mer 28 · si parte alle ${s.t}`:`Gio 29 · si parte alle ${s.t}`);
+  const st=effT(day,i), nt=nx?effT(day,i+1):"";
+  const label = live?`Adesso · dalle ${st}`:(day===1?`Mer 28 · si parte alle ${st}`:`Gio 29 · si parte alle ${st}`);
   $("now").innerHTML=`<span class="lbl">${label}</span><span class="hand">${esc(s.h)}</span>
     ${s.p?`<span class="place">${esc(PLACES[s.p].n)}</span>`:""}
     ${s.p?`<button type="button" class="pill" data-goto="${s.p}" data-day="${day}">Vai alla mappa ${ARR}</button>`:""}
-    ${nx?`<p class="nextline">Dopo, alle ${nx.t}: <b>${esc(nx.h)}</b></p>`:""}`;
-  const done=ci<0?0:ci+1;
+    ${nx?`<p class="nextline">Dopo, alle ${nt}: <b>${esc(nx.h)}</b></p>`:""}`;
+  const D=doneOf(day); let done=0; L.forEach((_,j)=>{ if(D[j]!=null||(ci>=0&&j<ci)) done++; });
   $("stats").innerHTML=`<span class="lbl">Avanzamento</span><div class="tiles">
     <button type="button" class="tilebtn" data-show="lista"><b id="statcheck">0</b><small>Esclusive prese</small>${ARRS}</button>
     <button type="button" class="tilebtn" data-jump="steps"><b>${done}/${L.length}</b><small>Tappe fatte</small>${ARRS}</button></div>`;
@@ -852,17 +874,26 @@ function stepActions(s,d){
 function renderSteps(){
   $("day-1").setAttribute("aria-pressed",day===1); $("day-2").setAttribute("aria-pressed",day===2);
   $("daytitle").textContent=day===1?"Le tappe di mercoledì":"Le tappe di giovedì";
-  const ci=curIndex(day);
+  const ci=curIndex(day), D=doneOf(day);
   $("steps").innerHTML=DAYS[day].map((s,i)=>{
-    const I=s.p?imgOf(s.p):null;
-    return `<li class="step glass${stepOv(day,s)?" has-ov":""}${i===ci?" is-now":""}${ci>=0&&i<ci?" is-past":""}" id="st-${i}">
+    const I=s.p?imgOf(s.p):null, et=effT(day,i), dn=D[i]!=null;
+    const tp=et===s.t?`<span class="tpill">${s.t}</span>`:`<span class="tpill moved"><s>${s.t}</s>${et}</span>`;
+    return `<li class="step glass${stepOv(day,s)?" has-ov":""}${i===ci&&!dn?" is-now":""}${dn||(ci>=0&&i<ci)?" is-past":""}${dn?" is-done":""}" id="st-${i}">
     ${stepTh(s,i)}
     ${(()=>{const o=stepOv(day,s); return o?`<img class="sov${o.flat?" flat":""}${o.mas?" mas":""}" src="${o.src}" alt="">`+(SOV2[s.p]?`<img class="sov second${s.p==="funko"?" jumbo":""}" src="${SOV2[s.p]}" alt="">`:""):"";})()}
-    <div class="body"><div class="row1"><span class="tpill">${s.t}</span>${i===ci?'<span class="badge now">adesso</span>':""}${s.opt?'<span class="badge">se c\'è tempo</span>':""}</div>
+    <div class="body"><div class="row1">${tp}${i===ci&&!dn?'<span class="badge now">adesso</span>':""}${s.opt?'<span class="badge">se c\'è tempo</span>':""}<button type="button" class="donebtn" data-done="${i}" aria-pressed="${dn}" aria-label="${dn?"Fatta":"Segna come fatta"}: ${esc(s.h)}"><i aria-hidden="true"></i>${dn?"Fatta "+hm(D[i]):"Fatta"}</button></div>
     <h3>${esc(s.h)}</h3>${s.p?`<div class="place"><span class="num ${dayCls(s.p)}">${numOf(s.p)}</span>${esc(PLACES[s.p].n)}</div>`:""}
     <p>${esc(s.b)}</p>${s.tip?`<p class="tip">${esc(s.tip)}</p>`:""}${stepActions(s,day)}</div></li>`;}).join("");
 }
 function renderAll(){ renderClock(); renderNow(); renderSteps(); updateCounts(); }
+// spunta: se è oggi conta l'ora vera, altrimenti l'orario previsto (niente scalo)
+$("steps").addEventListener("click",e=>{
+  const b=e.target.closest("[data-done]"); if(!b) return;
+  const i=+b.dataset.done, D=doneOf(day), t=today();
+  if(D[i]!=null) delete D[i]; else D[i]=t.d===day?t.min:effMin(day,i+1<DAYS[day].length?i+1:i);
+  store.set("lc60-done-"+day,JSON.stringify(D));
+  renderNow(); renderSteps(); updateCounts();
+});
 
 // Mappa in stile app: pin a fumetto per categoria, filtri, ricerca, trascina/zoom, scheda dal basso
 const CAT = {stazione:"auto",sanmartino:"acc",funko:"excl",oss:"excl",poke:"poke",bern:"l60",giglio:"l60",ap_croce:"l60",ap_regolo:"l60",ap_cmaria:"l60",nap:"firme",colonna:"manga",cav:"manga",star:"manga",verdi:"manga",jpopplus:"manga",carducci:"games"};
