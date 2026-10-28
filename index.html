@@ -200,6 +200,11 @@ svg.map.dragging{cursor:grabbing}
 .mapbtns{position:absolute;right:12px;bottom:48px;display:flex;flex-direction:column;gap:8px}
 .mapbtns button{width:42px;height:42px;border-radius:14px;border:1px solid var(--glass-line);background:var(--glass-strong);color:var(--ink);font:600 1.2rem/1 var(--body);cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.1);display:grid;place-items:center}
 .mapbtns svg{width:20px;height:20px;fill:none;stroke:var(--accent);stroke-width:2.2}
+.mapbtns button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent)} .mapbtns button[aria-pressed="true"] svg{stroke:#fff;fill:#fff}
+.map .me{pointer-events:none} .map .me .acc{fill:var(--accent);fill-opacity:.14;stroke:var(--accent);stroke-opacity:.4}
+.map .me .dot{fill:var(--accent);stroke:#fff} .map .me .pulse{fill:var(--accent);opacity:.25;transform-box:fill-box;transform-origin:center}
+@media (prefers-reduced-motion:no-preference){.map .me .pulse{animation:halo 1.8s ease-out infinite}}
+.mestat{position:absolute;left:12px;top:12px;right:66px;width:fit-content;padding:8px 12px;border-radius:14px;border:1px solid var(--glass-line);background:var(--glass-strong);color:var(--ink);font:500 .8rem/1.35 var(--body);box-shadow:0 4px 12px rgba(0,0,0,.1)}
 .mchips{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 4px;scrollbar-width:none}
 .mchips::-webkit-scrollbar{display:none}
 .mchips button{flex:none;display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:14px;border:1px solid var(--glass-line);background:var(--glass-strong);font:500 .84rem/1 var(--body);color:var(--ink);cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.05)}
@@ -479,12 +484,15 @@ details.grp[open] summary::after{transform:rotate(90deg)}
       <g class="scale"><line x1="216" y1="140" x2="302" y2="140"/><line x1="216" y1="134" x2="216" y2="146"/><line x1="302" y1="134" x2="302" y2="146"/><text class="lm" x="216" y="164">200 m</text></g>
       <g id="routes"></g>
       <g id="pins"></g>
+      <g id="me" class="me"></g>
     </svg>
     <div class="mapbtns">
       <button type="button" id="zin" aria-label="Avvicina">+</button>
       <button type="button" id="zout" aria-label="Allontana">−</button>
       <button type="button" id="zfit" aria-label="Ricentra la mappa"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
+      <button type="button" id="zme" aria-label="La mia posizione" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true" stroke-linejoin="round"><path d="M3.5 10.5 20.5 3.5 13.5 20.5 11.5 12.5z"/></svg></button>
     </div>
+    <div class="mestat" id="mestat" role="status" hidden></div>
   </div>
   <div class="msheet glass" id="sheet" aria-live="polite"></div>
   <h2>Tutte le tappe</h2>
@@ -937,6 +945,7 @@ function applyVB(){
   const s=pinScale();
   pinsG.querySelectorAll(".pin").forEach(g=>{ const P=PLACES[g.dataset.k]; g.setAttribute("transform",`translate(${P.x} ${P.y}) scale(${s})`); });
   routesG.querySelectorAll(".route").forEach(r=>r.style.strokeWidth=4*s);
+  drawMe();
 }
 function clampVB(){
   vb.w=Math.min(BASE.w*1.15,Math.max(150,vb.w)); vb.h=vb.w*BASE.h/BASE.w;
@@ -949,6 +958,35 @@ function zoom(f,cx,cy){
 $("zin").addEventListener("click",()=>zoom(1/1.6));
 $("zout").addEventListener("click",()=>zoom(1.6));
 $("zfit").addEventListener("click",()=>{ vb={...BASE}; applyVB(); });
+// posizione in tempo reale: funziona dove il browser la concede (sito GitHub sì, anteprima claude.ai no)
+const meG=$("me"), meBtn=$("zme"), meStat=$("mestat");
+let meWatch=null, me=null, meCenter=false, meTimer=null;
+const toXY=(lat,lon)=>({x:(lon-10.4885)*34483, y:(43.8515-lat)*47812});
+function meSay(t,keep){ clearTimeout(meTimer); meStat.textContent=t; meStat.hidden=!t; if(t&&!keep) meTimer=setTimeout(()=>meStat.hidden=true,4000); }
+function drawMe(){
+  if(!me){ meG.innerHTML=""; return; }
+  const s=pinScale();
+  meG.innerHTML=`<circle class="acc" cx="${me.x}" cy="${me.y}" r="${Math.min(me.acc,500)*.43}" stroke-width="${s}"/><circle class="pulse" cx="${me.x}" cy="${me.y}" r="${16*s}"/><circle class="dot" cx="${me.x}" cy="${me.y}" r="${7*s}" stroke-width="${3*s}"/>`;
+}
+function meOff(){ if(meWatch!==null) navigator.geolocation.clearWatch(meWatch); meWatch=null; me=null; meBtn.setAttribute("aria-pressed","false"); drawMe(); }
+meBtn.addEventListener("click",()=>{
+  if(meWatch!==null){ meOff(); meSay(""); return; }
+  if(!navigator.geolocation){ meSay("Questo browser non dà la posizione."); return; }
+  meBtn.setAttribute("aria-pressed","true"); meCenter=true; meSay("Cerco la tua posizione…",true);
+  meWatch=navigator.geolocation.watchPosition(p=>{
+    const c=p.coords, q=toXY(c.latitude,c.longitude);
+    me={...q, acc:c.accuracy||0};
+    const out=q.x<0||q.x>1000||q.y<0||q.y>765;
+    if(meCenter){ meCenter=false;
+      if(out){ const km=Math.hypot(q.x-560,q.y-400)/430; meSay(`Sei fuori dalla mappa, a circa ${km<10?km.toFixed(1).replace(".",","):Math.round(km)} km dal centro di Lucca.`,true); }
+      else { vb.w=Math.min(vb.w,320); vb.h=vb.w*BASE.h/BASE.w; vb.x=q.x-vb.w/2; vb.y=q.y-vb.h/2; clampVB(); meSay(`Sei qui · precisione ±${Math.round(me.acc)} m`); }
+    }
+    applyVB();
+  },err=>{
+    meOff();
+    meSay(err.code===1?"Posizione non concessa. Apri la pagina da blob-01.github.io/lc60 e consenti la posizione a Safari (Impostazioni › Privacy › Localizzazione).":"Posizione non trovata, riprova all'aperto.",true);
+  },{enableHighAccuracy:true,maximumAge:5000,timeout:20000});
+});
 // trascina con un dito / mouse, zoom con due dita
 let ptrs=new Map(), start=null, dragMoved=false, pinch=null;
 const toUnits = (dxPx,dyPx) => { const r=svg.getBoundingClientRect(); return [dxPx*vb.w/r.width, dyPx*vb.h/r.height]; };
