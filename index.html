@@ -967,7 +967,7 @@ function meSay(t,keep){ clearTimeout(meTimer); meStat.textContent=t; meStat.hidd
 function drawMe(){
   if(!me){ meG.innerHTML=""; return; }
   const s=pinScale();
-  meG.innerHTML=`<circle class="acc" cx="${me.x}" cy="${me.y}" r="${Math.min(me.acc,500)*.43}" stroke-width="${s}"/><circle class="pulse" cx="${me.x}" cy="${me.y}" r="${16*s}"/><circle class="dot" cx="${me.x}" cy="${me.y}" r="${7*s}" stroke-width="${3*s}"/>`;
+  meG.innerHTML=`<circle class="acc" cx="${me.x}" cy="${me.y}" r="${Math.min(me.acc,500)*.43}" stroke-width="${s}"/><circle class="pulse" cx="${me.x}" cy="${me.y}" r="${20*s}"/><circle class="dot" cx="${me.x}" cy="${me.y}" r="${9*s}" stroke-width="${3.5*s}"/>`;
 }
 function meOff(){ if(meWatch!==null) navigator.geolocation.clearWatch(meWatch); meWatch=null; me=null; meBtn.setAttribute("aria-pressed","false"); drawMe(); }
 // conferma nella pagina, poi la richiesta di Safari: le impostazioni dell'iPhone una pagina web non le può cambiare
